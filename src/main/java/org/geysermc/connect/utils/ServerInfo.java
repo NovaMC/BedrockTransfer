@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2020 GeyserMC. http://geysermc.org
+ * Copyright (c) 2019-2022 GeyserMC. http://geysermc.org
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,42 +23,31 @@
  * @link https://github.com/GeyserMC/GeyserConnect
  */
 
-package org.geysermc.connect.storage;
+package org.geysermc.connect.utils;
 
-import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
-import org.geysermc.connect.utils.Player;
-import org.geysermc.connect.utils.Server;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-import java.util.ArrayList;
-import java.util.List;
 
-public class AbstractStorageManager {
+@Getter @Setter
+@AllArgsConstructor
+@NoArgsConstructor
+public class ServerInfo {
 
-    public void setupStorage() { }
+    private String motd;
 
-    public void closeStorage() { }
+    private String submotd;
 
-    public void saveServers(Player player) { }
+    private int players;
 
-    public List<Server> loadServers(Player player) {
-        return new ArrayList<>();
-    }
+    @JsonProperty("max-players")
+    private int maxPlayers;
 
-    @Getter
-    public enum StorageType {
-        JSON("json", JsonStorageManager.class),
-        SQLITE("sqlite", SQLiteStorageManager.class),
-        MYSQL("mysql", MySQLStorageManager.class);
+    private String ip;
 
-        @JsonValue
-        private final String name;
+    private int port;
 
-        private final Class<? extends AbstractStorageManager> storageManager;
-
-        StorageType(String name, Class<? extends AbstractStorageManager> storageManager) {
-            this.name = name;
-            this.storageManager = storageManager;
-        }
-    }
 }

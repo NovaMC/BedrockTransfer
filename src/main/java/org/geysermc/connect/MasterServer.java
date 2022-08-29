@@ -28,27 +28,29 @@ package org.geysermc.connect;
 import com.nukkitx.protocol.bedrock.*;
 import io.netty.channel.DefaultEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import lombok.Getter;
 import org.geysermc.connect.proxy.GeyserProxyBootstrap;
-import org.geysermc.connect.storage.AbstractStorageManager;
-import org.geysermc.connect.storage.DisabledStorageManager;
-import org.geysermc.connect.utils.*;
+import org.geysermc.connect.utils.GeyserConnectFileUtils;
+import org.geysermc.connect.utils.Logger;
+import org.geysermc.connect.utils.ServerInfo;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.network.MinecraftProtocol;
 import org.geysermc.geyser.util.FileUtils;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.stream.Collectors;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.*;
 
 public class MasterServer {
 
     private BedrockServer bdServer;
+
+    @Getter
+    private final ServerInfo serverInfo;
 
     @Getter
     private boolean shuttingDown = false;
@@ -59,20 +61,13 @@ public class MasterServer {
     @Getter
     private final Logger logger;
 
-    @Getter
-    private final ScheduledExecutorService generalThreadPool;
-
-    @Getter
-    private final List<Player> players = new ObjectArrayList<>();
+    private final ScheduledExecutorService scheduledThreadPool;
 
     @Getter
     private GeyserProxyBootstrap geyserProxy;
 
     @Getter
     private GeyserConnectConfig geyserConnectConfig;
-
-    @Getter
-    private AbstractStorageManager storageManager;
 
     @Getter
     private final DefaultEventLoopGroup eventLoopGroup = new DefaultEventLoopGroup(new DefaultThreadFactory("Geyser player thread"));
@@ -92,33 +87,23 @@ public class MasterServer {
 
         logger.setDebug(geyserConnectConfig.isDebugMode());
 
-        // As this is only used for fixing the form image bug, we don't need to handle many threads
-        this.generalThreadPool = Executors.newSingleThreadScheduledExecutor();
+        // As this is only used for server querying, we don't need to handle many threads
+        this.scheduledThreadPool = Executors.newSingleThreadScheduledExecutor();
+
+        // Grab serverinfo from config defaults
+        serverInfo = geyserConnectConfig.getServerInfo();
+
+        // Try to sync the server info
+        updateSessionInfo(serverInfo);
+
+        // Schedule update task
+        scheduledThreadPool.scheduleWithFixedDelay(() -> updateSessionInfo(serverInfo),
+                geyserConnectConfig.getUpdateInterval(), geyserConnectConfig.getUpdateInterval(), TimeUnit.SECONDS);
 
         // Start a timer to keep the thread running
         Timer timer = new Timer();
         TimerTask task = new TimerTask() { public void run() { } };
         timer.scheduleAtFixedRate(task, 0L, 1000L);
-
-        if (!geyserConnectConfig.getCustomServers().isEnabled()) {
-            // Force the storage manager if we have it disabled
-            storageManager = new DisabledStorageManager();
-            logger.info("Disabled custom player servers");
-        } else {
-            try {
-                storageManager = geyserConnectConfig.getCustomServers().getStorageType().getStorageManager().newInstance();
-            } catch (Exception e) {
-                logger.severe("Invalid storage manager class!", e);
-                return;
-            }
-        }
-
-        storageManager.setupStorage();
-
-        // Create the base welcome.txt file
-        try {
-            GeyserConnectFileUtils.fileOrCopiedFromResource(new File(getGeyserConnectConfig().getWelcomeFile()), "welcome.txt", (x) -> x);
-        } catch (IOException ignored) { }
 
         start(geyserConnectConfig.getPort());
 
@@ -133,34 +118,38 @@ public class MasterServer {
 
         bdServer.setHandler(new BedrockServerEventHandler() {
             @Override
-            public boolean onConnectionRequest(InetSocketAddress address) {
+            public boolean onConnectionRequest(@NotNull InetSocketAddress address) {
                 return true; // Connection will be accepted
             }
 
             @Override
-            public BedrockPong onQuery(InetSocketAddress address) {
-                int playerCount = players.size() + GeyserImpl.getInstance().getSessionManager().size();
-
-                String subMotd = geyserConnectConfig.getSubmotd();
+            public BedrockPong onQuery(@NotNull InetSocketAddress address) {
+                String subMotd = serverInfo.getSubmotd();
                 if (subMotd == null || subMotd.isEmpty()) {
                     subMotd = "GeyserConnect";
                 }
+                String motd = serverInfo.getMotd();
+                boolean swapMotd = geyserConnectConfig.isSwapMotd();
 
                 BedrockPong bdPong = new BedrockPong();
+                // Static info
                 bdPong.setEdition("MCPE");
-                bdPong.setMotd(geyserConnectConfig.getMotd());
-                bdPong.setSubMotd(subMotd);
-                bdPong.setPlayerCount(playerCount);
-                bdPong.setMaximumPlayerCount(geyserConnectConfig.getMaxPlayers());
                 bdPong.setGameType("Survival");
                 bdPong.setIpv4Port(port);
+                // Data from serverInfo
+                bdPong.setMotd(!swapMotd ? motd : subMotd);
+                bdPong.setSubMotd(!swapMotd ? subMotd : motd);
+                bdPong.setPlayerCount(serverInfo.getPlayers());
+                bdPong.setMaximumPlayerCount(serverInfo.getMaxPlayers());
+                // Set version info
                 bdPong.setProtocolVersion(MinecraftProtocol.DEFAULT_BEDROCK_CODEC.getProtocolVersion());
                 bdPong.setVersion(MinecraftProtocol.DEFAULT_BEDROCK_CODEC.getMinecraftVersion());
+
                 return bdPong;
             }
 
             @Override
-            public void onSessionCreation(BedrockServerSession session) {
+            public void onSessionCreation(@NotNull BedrockServerSession session) {
                 session.setPacketHandler(new PacketHandler(session, instance));
             }
         });
@@ -174,14 +163,53 @@ public class MasterServer {
         logger.info("Server started on " + geyserConnectConfig.getAddress() + ":" + port);
     }
 
+    // Taken and adapted from MCXboxBroadcast
+    // https://github.com/rtm516/MCXboxBroadcast/blob/master/bootstrap/standalone/src/main/java/com/rtm516/mcxboxbroadcast/bootstrap/standalone/StandaloneMain.java
+    private void updateSessionInfo(ServerInfo serverInfo) {
+        if (geyserConnectConfig.isQueryServer()) {
+            BedrockClient client = null;
+            try {
+                InetSocketAddress bindAddress = new InetSocketAddress("0.0.0.0", 0);
+                client = new BedrockClient(bindAddress);
+
+                client.bind().join();
+
+                InetSocketAddress addressToPing = new InetSocketAddress(serverInfo.getIp(), serverInfo.getPort());
+                BedrockPong pong = client.ping(addressToPing, 1500, TimeUnit.MILLISECONDS).get();
+
+                // Update the session information
+                serverInfo.setMotd(pong.getMotd());
+                serverInfo.setSubmotd(pong.getSubMotd());
+                serverInfo.setPlayers(pong.getPlayerCount());
+                serverInfo.setMaxPlayers(pong.getMaximumPlayerCount());
+
+                logger.debug("Updated server info");
+            } catch (InterruptedException | ExecutionException e) {
+                if (e.getCause() instanceof TimeoutException) {
+                    logger.error("Timed out while trying to ping server");
+                } else {
+                    logger.error("Failed to ping server", e);
+                }
+                // Set session info back to default
+                serverInfo.setMotd(geyserConnectConfig.getServerInfo().getMotd());
+                serverInfo.setSubmotd(geyserConnectConfig.getServerInfo().getSubmotd());
+                serverInfo.setPlayers(geyserConnectConfig.getServerInfo().getPlayers());
+                serverInfo.setMaxPlayers(geyserConnectConfig.getServerInfo().getMaxPlayers());
+            } finally {
+                if (client != null) {
+                    client.close();
+                }
+            }
+        }
+    }
+
     public void shutdown() {
         shuttingDown = true;
         bdServer.close();
 
         shutdownGeyserProxy();
 
-        generalThreadPool.shutdown();
-        storageManager.closeStorage();
+        scheduledThreadPool.shutdown();
         System.exit(0);
     }
 
@@ -192,7 +220,6 @@ public class MasterServer {
 
             this.geyserProxy = new GeyserProxyBootstrap();
             geyserProxy.onEnable();
-            GeyserImpl.getInstance().getPendingMicrosoftAuthentication().setStoreServerInformation();
         }
     }
 
@@ -201,9 +228,5 @@ public class MasterServer {
             geyserProxy.onDisable();
             geyserProxy = null;
         }
-    }
-
-    public List<Server> getServers(ServerCategory serverCategory) {
-        return getGeyserConnectConfig().getServers().stream().filter(server -> server.getCategory() == serverCategory).collect(Collectors.toList());
     }
 }

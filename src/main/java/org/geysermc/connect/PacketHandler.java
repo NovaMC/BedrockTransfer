@@ -37,39 +37,22 @@ import com.nimbusds.jose.shaded.json.JSONArray;
 import com.nukkitx.network.util.DisconnectReason;
 import com.nukkitx.protocol.bedrock.BedrockPacketCodec;
 import com.nukkitx.protocol.bedrock.BedrockServerSession;
-import com.nukkitx.protocol.bedrock.data.AttributeData;
 import com.nukkitx.protocol.bedrock.data.ExperimentData;
 import com.nukkitx.protocol.bedrock.handler.BedrockPacketHandler;
 import com.nukkitx.protocol.bedrock.packet.*;
 import com.nukkitx.protocol.bedrock.util.EncryptionUtils;
 import com.nukkitx.protocol.bedrock.v471.Bedrock_v471;
-import org.geysermc.connect.proxy.GeyserProxySession;
-import org.geysermc.connect.ui.FormID;
-import org.geysermc.connect.ui.UIHandler;
-import org.geysermc.connect.utils.GeyserConnectFileUtils;
 import org.geysermc.connect.utils.Player;
-import org.geysermc.connect.utils.Server;
-import org.geysermc.cumulus.Form;
-import org.geysermc.cumulus.response.CustomFormResponse;
-import org.geysermc.cumulus.response.FormResponse;
-import org.geysermc.cumulus.response.SimpleFormResponse;
-import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.entity.attribute.GeyserAttributeType;
+import org.geysermc.connect.utils.ServerInfo;
 import org.geysermc.geyser.network.MinecraftProtocol;
 import org.geysermc.geyser.registry.Registries;
-import org.geysermc.geyser.session.PendingMicrosoftAuthentication.*;
 import org.geysermc.geyser.session.auth.AuthData;
-import org.geysermc.geyser.session.auth.AuthType;
 import org.geysermc.geyser.session.auth.BedrockClientData;
-import org.geysermc.geyser.util.FileUtils;
 
-import java.io.File;
 import java.io.IOException;
 import java.security.interfaces.ECPublicKey;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 public class PacketHandler implements BedrockPacketHandler {
 
@@ -90,9 +73,6 @@ public class PacketHandler implements BedrockPacketHandler {
     public void disconnect(DisconnectReason reason) {
         if (player != null) {
             masterServer.getLogger().info(player.getAuthData().name() + " has disconnected from the master server (" + reason + ")");
-            masterServer.getStorageManager().saveServers(player);
-
-            masterServer.getPlayers().remove(player);
         }
     }
 
@@ -183,7 +163,6 @@ public class PacketHandler implements BedrockPacketHandler {
 
                 // Create a new player and add it to the players list
                 player = new Player(authData, session);
-                masterServer.getPlayers().add(player);
 
                 player.setChainData(chainData);
 
@@ -214,26 +193,11 @@ public class PacketHandler implements BedrockPacketHandler {
     @Override
     public boolean handle(ResourcePackClientResponsePacket packet) {
         switch (packet.getStatus()) {
-            case COMPLETED:
+            case COMPLETED -> {
                 masterServer.getLogger().info("Logged in " + player.getAuthData().name() + " (" + player.getAuthData().xuid() + ", " + player.getAuthData().uuid() + ")");
-
-                ProxyAuthenticationTask task = (ProxyAuthenticationTask) GeyserImpl.getInstance()
-                        .getPendingMicrosoftAuthentication().getTask(player.getAuthData().xuid());
-                if (task != null && task.getAuthentication().isDone()) {
-                    String address = task.getServer();
-                    int port = task.getPort();
-                    player.setCurrentServer(new Server(address, port, true, false));
-                    GeyserProxySession session = player.createGeyserSession(false);
-                    session.setRemoteAddress(address);
-                    session.setRemotePort(port);
-                    session.setRemoteAuthType(AuthType.ONLINE);
-
-                    session.onMicrosoftLoginComplete(task);
-                } else {
-                    player.sendStartGame();
-                }
-                break;
-            case HAVE_ALL_PACKS:
+                player.sendStartGame();
+            }
+            case HAVE_ALL_PACKS -> {
                 ResourcePackStackPacket stack = new ResourcePackStackPacket();
                 stack.setExperimentsPreviouslyToggled(false);
                 stack.setForcedToAccept(false);
@@ -248,12 +212,9 @@ public class PacketHandler implements BedrockPacketHandler {
                     // Allow extended world height in the overworld to work for pre-1.18 clients
                     stack.getExperiments().add(new ExperimentData("caves_and_cliffs", true));
                 }
-
                 session.sendPacket(stack);
-                break;
-            default:
-                session.disconnect("disconnectionScreen.resourcePack");
-                break;
+            }
+            default -> session.disconnect("disconnectionScreen.resourcePack");
         }
 
         return true;
@@ -263,136 +224,9 @@ public class PacketHandler implements BedrockPacketHandler {
     public boolean handle(SetLocalPlayerAsInitializedPacket packet) {
         masterServer.getLogger().debug("Player initialized: " + player.getAuthData().name());
 
-        if (player.getCurrentServer() != null) {
-            // Player is already logged in via delayed Microsoft authentication
-            return false;
-        }
-
-        // Handle the virtual host if specified
-        GeyserConnectConfig.VirtualHostSection vhost = MasterServer.getInstance().getGeyserConnectConfig().getVhost();
-        if (vhost.isEnabled()) {
-            String domain = player.getClientData().getServerAddress().split(":")[0];
-            if (!domain.equals(vhost.getBaseDomain()) && domain.endsWith("." + vhost.getBaseDomain())) {
-                String address = "";
-                int port = 25565;
-                boolean online = true;
-
-                // Parse the address used
-                String[] domainParts = domain.replaceFirst("\\." + vhost.getBaseDomain() + "$", "").split("\\._");
-                for (int i = 0; i < domainParts.length; i++) {
-                    String part = domainParts[i];
-                    if (i == 0) {
-                        address = part;
-                    } else if (part.startsWith("p")) {
-                        port = Integer.parseInt(part.substring(1));
-                    } else if (part.startsWith("o")) {
-                        online = false;
-                    }
-                }
-
-                // They didn't specify an address so disconnect them
-                if (address.startsWith("_")) {
-                    session.disconnect("disconnectionScreen.invalidIP");
-                    return false;
-                }
-
-                // Log the virtual host usage
-                masterServer.getLogger().info(player.getAuthData().name() + " is using virtualhost: " + address + ":" + port + (!online ? " (offline)" : ""));
-
-                // Send the player to the wanted server
-                player.sendToServer(new Server(address, port, online, false));
-
-                return false;
-            }
-        }
-
-        String message = "";
-        try {
-            File messageFile = GeyserConnectFileUtils.fileOrCopiedFromResource(new File(MasterServer.getInstance().getGeyserConnectConfig().getWelcomeFile()), "welcome.txt", (x) -> x);
-            message = new String(FileUtils.readAllBytes(messageFile));
-        } catch (IOException ignored) { }
-
-        if (!message.trim().isEmpty()) {
-            player.sendWindow(FormID.WELCOME, UIHandler.getMessageWindow(message));
-        } else {
-            player.sendWindow(FormID.MAIN, UIHandler.getMainMenu());
-        }
-
-        return false;
-    }
-
-    @Override
-    public boolean handle(ModalFormResponsePacket packet) {
-        // Make sure the form is valid
-        FormID id = FormID.fromId(packet.getFormId());
-        if (id != player.getCurrentWindowId())
-            return false;
-
-        // Fetch the form and parse the response
-        Form window = player.getCurrentWindow();
-        FormResponse response = window.parseResponse(packet.getFormData().trim());
-
-        // Resend the form if they closed it
-        if (!response.isCorrect() && !id.isHandlesNull()) {
-            player.resendWindow();
-        } else {
-            // Send the response to the correct response function
-            switch (id) {
-                case WELCOME:
-                    player.sendWindow(FormID.MAIN, UIHandler.getMainMenu());
-                    break;
-
-                case MAIN:
-                    UIHandler.handleMainMenuResponse(player, (SimpleFormResponse) response);
-                    break;
-
-                case LIST_SERVERS:
-                    UIHandler.handleServerListResponse(player, (SimpleFormResponse) response);
-                    break;
-
-                case DIRECT_CONNECT:
-                    UIHandler.handleDirectConnectResponse(player, (CustomFormResponse) response);
-                    break;
-
-                case EDIT_SERVERS:
-                    UIHandler.handleEditServerListResponse(player, (SimpleFormResponse) response);
-                    break;
-
-                case ADD_SERVER:
-                    UIHandler.handleAddServerResponse(player, (CustomFormResponse) response);
-                    break;
-
-                case SERVER_OPTIONS:
-                    UIHandler.handleServerOptionsResponse(player, (SimpleFormResponse) response);
-                    break;
-
-                case REMOVE_SERVER:
-                    UIHandler.handleServerRemoveResponse(player, (SimpleFormResponse) response);
-                    break;
-
-                case EDIT_SERVER:
-                    UIHandler.handleEditServerResponse(player, (CustomFormResponse) response);
-                    break;
-
-                default:
-                    player.resendWindow();
-                    break;
-            }
-        }
-
-        return true;
-    }
-
-    @Override
-    public boolean handle(NetworkStackLatencyPacket packet) {
-        // This is to fix a bug in the client where it doesn't load form images
-        UpdateAttributesPacket updateAttributesPacket = new UpdateAttributesPacket();
-        updateAttributesPacket.setRuntimeEntityId(1);
-        List<AttributeData> attributes = Collections.singletonList(GeyserAttributeType.EXPERIENCE_LEVEL.getAttribute(0f));
-        updateAttributesPacket.setAttributes(attributes);
-
-        // Doesn't work 100% of the time but fixes it most of the time
-        MasterServer.getInstance().getGeneralThreadPool().schedule(() -> session.sendPacket(updateAttributesPacket), 500, TimeUnit.MILLISECONDS);
+        ServerInfo server = MasterServer.getInstance().getServerInfo();
+        // Send the player to the wanted server
+        player.sendToServer(server);
 
         return false;
     }

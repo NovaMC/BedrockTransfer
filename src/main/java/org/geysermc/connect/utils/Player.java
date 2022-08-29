@@ -33,29 +33,14 @@ import com.nukkitx.nbt.NbtMap;
 import com.nukkitx.protocol.bedrock.BedrockServerSession;
 import com.nukkitx.protocol.bedrock.data.*;
 import com.nukkitx.protocol.bedrock.packet.*;
-import com.nukkitx.protocol.bedrock.v471.Bedrock_v471;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import lombok.Getter;
 import lombok.Setter;
-import org.geysermc.connect.MasterServer;
-import org.geysermc.connect.proxy.GeyserProxySession;
-import org.geysermc.connect.ui.FormID;
-import org.geysermc.cumulus.Form;
-import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.level.BedrockDimension;
-import org.geysermc.geyser.network.UpstreamPacketHandler;
-import org.geysermc.geyser.registry.BlockRegistries;
 import org.geysermc.geyser.registry.Registries;
 import org.geysermc.geyser.registry.type.ItemMappings;
 import org.geysermc.geyser.session.auth.AuthData;
-import org.geysermc.geyser.session.auth.AuthType;
 import org.geysermc.geyser.session.auth.BedrockClientData;
 import org.geysermc.geyser.util.ChunkUtils;
-import org.geysermc.geyser.util.DimensionUtils;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -67,29 +52,12 @@ public class Player {
 
     private final BedrockServerSession session;
 
-    private final List<Server> servers = new ArrayList<>();
-    private final Long2ObjectMap<ModalFormRequestPacket> forms = new Long2ObjectOpenHashMap<>();
-
-    private Form currentWindow;
-    private FormID currentWindowId;
-
-    @Setter
-    private Server currentServer;
-
     @Setter
     private BedrockClientData clientData;
-
-    @Setter
-    private ServerCategory serverCategory;
 
     public Player(AuthData authData, BedrockServerSession session) {
         this.authData = authData;
         this.session = session;
-
-        // Should fetch the servers from some form of db
-        if (MasterServer.getInstance().getGeyserConnectConfig().getCustomServers().isEnabled()) {
-            servers.addAll(MasterServer.getInstance().getStorageManager().loadServers(this));
-        }
     }
 
     /**
@@ -200,104 +168,11 @@ public class Player {
         session.sendPacket(setEntityMotionPacket);
     }
 
-    /**
-     * Send a window with the specified id and content
-     * Also cache it against the player for later use
-     *
-     * @param id The {@link FormID} to use for the form
-     * @param window The {@link Form} to turn into json and send
-     */
-    public void sendWindow(FormID id, Form window) {
-        this.currentWindow = window;
-        this.currentWindowId = id;
-
-        ModalFormRequestPacket modalFormRequestPacket = new ModalFormRequestPacket();
-        modalFormRequestPacket.setFormId(id.ordinal());
-        modalFormRequestPacket.setFormData(window.getJsonData());
-        session.sendPacket(modalFormRequestPacket);
-
-        // This packet is used to fix the image loading bug
-        NetworkStackLatencyPacket networkStackLatencyPacket = new NetworkStackLatencyPacket();
-        networkStackLatencyPacket.setFromServer(true);
-        networkStackLatencyPacket.setTimestamp(System.currentTimeMillis());
-        session.sendPacket(networkStackLatencyPacket);
-    }
-
-    public void resendWindow() {
-        sendWindow(currentWindowId, currentWindow);
-    }
-
-    /**
-     * Send the player to the Geyser proxy server or straight to the bedrock server if it is
-     */
-    public void connectToProxy() {
-        if (currentServer.isBedrock()) {
-            TransferPacket transferPacket = new TransferPacket();
-            transferPacket.setAddress(currentServer.getAddress());
-            transferPacket.setPort(currentServer.getPort());
-            session.sendPacket(transferPacket);
-        } else {
-            GeyserProxySession geyserSession = createGeyserSession(true);
-            GeyserImpl geyser = geyserSession.getGeyser();
-
-            geyserSession.setDimension(DimensionUtils.THE_END);
-
-            geyserSession.setRemoteAddress(currentServer.getAddress());
-            geyserSession.setRemotePort(currentServer.getPort());
-            geyserSession.setRemoteAuthType(currentServer.isOnline() ? AuthType.ONLINE : AuthType.OFFLINE);
-
-            // Tell Geyser to handle the login
-            SetLocalPlayerAsInitializedPacket initializedPacket = new SetLocalPlayerAsInitializedPacket();
-            initializedPacket.setRuntimeEntityId(geyserSession.getPlayerEntity().getGeyserId());
-            session.getPacketHandler().handle(initializedPacket);
-
-            if (geyser.getConfig().getSavedUserLogins().contains(authData.name())) {
-                String refreshToken = geyser.refreshTokenFor(authData.name());
-                if (refreshToken != null) {
-                    geyserSession.authenticateWithRefreshToken(refreshToken);
-                }
-            }
-
-            if (geyserSession.getRemoteAuthType() != AuthType.ONLINE) {
-                geyserSession.authenticate(geyserSession.getAuthData().name());
-            }
-        }
-    }
-
-    public GeyserProxySession createGeyserSession(boolean initialized) {
-        GeyserProxySession geyserSession = new GeyserProxySession(GeyserImpl.getInstance(), session,
-                MasterServer.getInstance().getEventLoopGroup().next(), this, initialized);
-        session.setPacketHandler(new UpstreamPacketHandler(GeyserImpl.getInstance(), geyserSession));
-        // The player will be tracked from Geyser from here
-        MasterServer.getInstance().getPlayers().remove(this);
-        GeyserImpl.getInstance().getSessionManager().addPendingSession(geyserSession);
-
-        geyserSession.getUpstream().getSession().setPacketCodec(session.getPacketCodec());
-
-        // Set the block translation based off of version
-        geyserSession.setBlockMappings(BlockRegistries.BLOCKS.forVersion(session.getPacketCodec().getProtocolVersion()));
-        geyserSession.setItemMappings(Registries.ITEMS.forVersion(session.getPacketCodec().getProtocolVersion()));
-
-        geyserSession.setAuthData(authData);
-        geyserSession.setCertChainData(chainData);
-        geyserSession.setClientData(clientData);
-
-        return geyserSession;
-    }
-
-    public void sendToServer(Server server) {
-        // Geyser will show a "please wait" message in action bar
-
+    public void sendToServer(ServerInfo server) {
         // Send the user over to the server
-        setCurrentServer(server);
-        connectToProxy();
-    }
-
-    public List<Server> getCurrentServers() {
-        if (serverCategory == ServerCategory.CUSTOM) {
-            return servers;
-        }
-
-        return MasterServer.getInstance().getServers(serverCategory);
+        TransferPacket transferPacket = new TransferPacket();
+        transferPacket.setAddress(server.getIp());
+        transferPacket.setPort(server.getPort());
+        session.sendPacket(transferPacket);
     }
 }

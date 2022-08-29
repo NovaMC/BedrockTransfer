@@ -46,7 +46,7 @@ remote:
   auth-type: online
   # Allow for password-based authentication methods through Geyser. Only useful in online mode.
   # If this is false, users must authenticate to Microsoft using a code provided by Geyser on their desktop.
-  allow-password-authentication: %ALLOWPASSWORDAUTHENTICATION%
+  allow-password-authentication: false
   # Whether to enable PROXY protocol or not while connecting to the server.
   # This is useful only when:
   # 1) Your server supports PROXY protocol (it probably doesn't)
