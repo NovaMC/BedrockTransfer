@@ -28,7 +28,6 @@ package org.geysermc.connect.proxy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.geysermc.common.PlatformType;
-import org.geysermc.connect.GeyserConnectConfig;
 import org.geysermc.connect.MasterServer;
 import org.geysermc.geyser.GeyserBootstrap;
 import org.geysermc.geyser.GeyserImpl;
@@ -80,9 +79,6 @@ public class GeyserProxyBootstrap implements GeyserBootstrap {
             geyserLogger.severe("Failed to read proxy_config.yml! Make sure it's up to date and/or readable+writable!", ex);
             return;
         }
-
-        // Not sure there is a point in doing this as its a static config
-        GeyserConfiguration.checkGeyserConfiguration(geyserConfig, geyserLogger);
 
         // Create the connector and command manager
         geyser = GeyserImpl.start(PlatformType.STANDALONE, this);
