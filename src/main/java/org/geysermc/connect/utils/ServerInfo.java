@@ -37,6 +37,15 @@ import lombok.Setter;
 @NoArgsConstructor
 public class ServerInfo {
 
+    public ServerInfo(ServerInfo original) {
+        motd = original.getMotd();
+        submotd = original.getSubmotd();
+        players = original.getPlayers();
+        maxPlayers = original.getMaxPlayers();
+        ip = original.getIp();
+        port = original.getPort();
+    }
+
     private String motd;
 
     private String submotd;
@@ -49,5 +58,4 @@ public class ServerInfo {
     private String ip;
 
     private int port;
-
 }

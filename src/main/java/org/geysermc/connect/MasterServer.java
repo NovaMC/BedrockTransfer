@@ -91,14 +91,7 @@ public class MasterServer {
         this.scheduledThreadPool = Executors.newSingleThreadScheduledExecutor();
 
         // Grab serverinfo from config defaults
-        serverInfo = geyserConnectConfig.getServerInfo();
-
-        // Try to sync the server info
-        updateSessionInfo(serverInfo);
-
-        // Schedule update task
-        scheduledThreadPool.scheduleWithFixedDelay(() -> updateSessionInfo(serverInfo),
-                geyserConnectConfig.getUpdateInterval(), geyserConnectConfig.getUpdateInterval(), TimeUnit.SECONDS);
+        serverInfo = new ServerInfo(geyserConnectConfig.getServerInfo());
 
         // Start a timer to keep the thread running
         Timer timer = new Timer();
@@ -112,6 +105,13 @@ public class MasterServer {
 
     private void start(int port) {
         logger.info("Starting...");
+
+        // Try to sync the server info
+        updateSessionInfo(serverInfo);
+
+        // Schedule update task
+        scheduledThreadPool.scheduleWithFixedDelay(() -> updateSessionInfo(serverInfo),
+                geyserConnectConfig.getUpdateInterval(), geyserConnectConfig.getUpdateInterval(), TimeUnit.SECONDS);
 
         InetSocketAddress bindAddress = new InetSocketAddress(geyserConnectConfig.getAddress(), port);
         bdServer = new BedrockServer(bindAddress);
@@ -195,6 +195,8 @@ public class MasterServer {
                 serverInfo.setSubmotd(geyserConnectConfig.getServerInfo().getSubmotd());
                 serverInfo.setPlayers(geyserConnectConfig.getServerInfo().getPlayers());
                 serverInfo.setMaxPlayers(geyserConnectConfig.getServerInfo().getMaxPlayers());
+
+                logger.debug("Set server info back to default");
             } finally {
                 if (client != null) {
                     client.close();
