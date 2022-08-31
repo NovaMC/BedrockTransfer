@@ -34,7 +34,6 @@ import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.command.CommandManager;
 import org.geysermc.geyser.configuration.GeyserConfiguration;
 import org.geysermc.geyser.dump.BootstrapDumpInfo;
-import org.geysermc.geyser.ping.GeyserLegacyPingPassthrough;
 import org.geysermc.geyser.ping.IGeyserPingPassthrough;
 import org.geysermc.geyser.text.GeyserLocale;
 
@@ -49,10 +48,8 @@ import java.util.stream.Collectors;
 
 public class GeyserProxyBootstrap implements GeyserBootstrap {
 
-    private GeyserProxyCommandManager geyserCommandManager;
     private GeyserProxyConfiguration geyserConfig;
     private GeyserProxyLogger geyserLogger;
-    private IGeyserPingPassthrough geyserPingPassthrough;
 
     private GeyserImpl geyser;
 
@@ -82,13 +79,6 @@ public class GeyserProxyBootstrap implements GeyserBootstrap {
 
         // Create the connector and command manager
         geyser = GeyserImpl.start(PlatformType.STANDALONE, this);
-        geyserCommandManager = new GeyserProxyCommandManager(geyser);
-
-        // Start the ping passthrough thread, again don't think there is a point
-        geyserPingPassthrough = GeyserLegacyPingPassthrough.init(geyser);
-
-        // Swap the normal handler to our custom handler so we can change some
-        geyser.getBedrockServer().setHandler(new ProxyConnectorServerEventHandler(geyser));
     }
 
     @Override
@@ -108,12 +98,12 @@ public class GeyserProxyBootstrap implements GeyserBootstrap {
 
     @Override
     public CommandManager getGeyserCommandManager() {
-        return geyserCommandManager;
+        return null;
     }
 
     @Override
     public IGeyserPingPassthrough getGeyserPingPassthrough() {
-        return geyserPingPassthrough;
+        return null;
     }
 
     @Override

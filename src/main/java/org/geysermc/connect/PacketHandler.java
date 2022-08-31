@@ -37,15 +37,12 @@ import com.nimbusds.jose.shaded.json.JSONArray;
 import com.nukkitx.network.util.DisconnectReason;
 import com.nukkitx.protocol.bedrock.BedrockPacketCodec;
 import com.nukkitx.protocol.bedrock.BedrockServerSession;
-import com.nukkitx.protocol.bedrock.data.ExperimentData;
 import com.nukkitx.protocol.bedrock.handler.BedrockPacketHandler;
 import com.nukkitx.protocol.bedrock.packet.*;
 import com.nukkitx.protocol.bedrock.util.EncryptionUtils;
-import com.nukkitx.protocol.bedrock.v471.Bedrock_v471;
 import org.geysermc.connect.utils.Player;
 import org.geysermc.connect.utils.ServerInfo;
 import org.geysermc.geyser.network.MinecraftProtocol;
-import org.geysermc.geyser.registry.Registries;
 import org.geysermc.geyser.session.auth.AuthData;
 import org.geysermc.geyser.session.auth.BedrockClientData;
 
@@ -203,15 +200,6 @@ public class PacketHandler implements BedrockPacketHandler {
                 stack.setForcedToAccept(false);
                 stack.setGameVersion("*");
 
-                if (Registries.ITEMS.forVersion(session.getPacketCodec().getProtocolVersion()).getFurnaceMinecartData() != null) {
-                    // Allow custom items to work
-                    stack.getExperiments().add(new ExperimentData("data_driven_items", true));
-                }
-
-                if (session.getPacketCodec().getProtocolVersion() <= Bedrock_v471.V471_CODEC.getProtocolVersion()) {
-                    // Allow extended world height in the overworld to work for pre-1.18 clients
-                    stack.getExperiments().add(new ExperimentData("caves_and_cliffs", true));
-                }
                 session.sendPacket(stack);
             }
             default -> session.disconnect("disconnectionScreen.resourcePack");

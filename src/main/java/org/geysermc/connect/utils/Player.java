@@ -127,12 +127,6 @@ public class Player {
         startGamePacket.setVanillaVersion("*");
         session.sendPacket(startGamePacket);
 
-        if (itemMappings.getFurnaceMinecartData() != null) {
-            ItemComponentPacket itemComponentPacket = new ItemComponentPacket();
-            itemComponentPacket.getItems().add(itemMappings.getFurnaceMinecartData());
-            session.sendPacket(itemComponentPacket);
-        }
-
         // Send an empty chunk
         LevelChunkPacket data = new LevelChunkPacket();
         data.setChunkX(0);
