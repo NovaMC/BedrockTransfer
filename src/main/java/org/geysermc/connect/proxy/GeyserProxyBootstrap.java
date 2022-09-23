@@ -31,7 +31,7 @@ import org.geysermc.common.PlatformType;
 import org.geysermc.connect.MasterServer;
 import org.geysermc.geyser.GeyserBootstrap;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.command.CommandManager;
+import org.geysermc.geyser.command.GeyserCommandManager;
 import org.geysermc.geyser.configuration.GeyserConfiguration;
 import org.geysermc.geyser.dump.BootstrapDumpInfo;
 import org.geysermc.geyser.ping.IGeyserPingPassthrough;
@@ -78,7 +78,8 @@ public class GeyserProxyBootstrap implements GeyserBootstrap {
         }
 
         // Create the connector and command manager
-        geyser = GeyserImpl.start(PlatformType.STANDALONE, this);
+        geyser = GeyserImpl.load(PlatformType.STANDALONE, this);
+        GeyserImpl.start();
     }
 
     @Override
@@ -97,7 +98,7 @@ public class GeyserProxyBootstrap implements GeyserBootstrap {
     }
 
     @Override
-    public CommandManager getGeyserCommandManager() {
+    public GeyserCommandManager getGeyserCommandManager() {
         return null;
     }
 
